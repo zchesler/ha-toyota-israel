@@ -58,7 +58,13 @@ Every endpoint returns the same wrapper; the payload is under `body`:
 ```
 
 `errorCode` is `0` on success. Confirmed live against `GET settings/all`, which
-needs no authentication.
+needs no authentication and is a useful place to check connectivity.
+
+`settings/all` also carries server-side config worth reading, including the
+battery thresholds the app colours its gauge with — `BatteryMaxRangeOrange` (49)
+and `BatteryMaxRangeRed` (15) — and `Application.UpdateForceMinVersionAndroid`,
+which is the minimum app build the server will serve (514 at time of writing,
+matching `AppVersion: 2.2.41`).
 
 ---
 
@@ -66,24 +72,39 @@ needs no authentication.
 
 Login is phone number + Israeli ID + one-time SMS code. There is no password.
 
-**1. Request the code** — `account/generateVerificationCodeV2`
+**1. Request the code** — `POST account/generateVerificationCodeV2`
 
 ```json
-{ "mobilePhone": "05XXXXXXXX", "personalId": "XXXXXXXXX",
-  "isRegister": false, "consents": [] }
+{ "phoneNumber": "05XXXXXXXX",
+  "personalId": "XXXXXXXXX",
+  "consents": [ { "consentType": "TermsAndPrivacy",
+                  "largeText": "", "mediumText": "", "smallText": "" } ] }
 ```
 
 Returns `{ consentsToken, totalTimeoutInSeconds, needsPersonalInfoReview }`.
 
-**2. Exchange the code for a token** — `account/verifyUserV2`
+Note the JSON keys do **not** match the app's Kotlin field names — the DTO calls
+it `mobilePhone` and misspells `smallTex`, but the wire format is `phoneNumber`
+and `smallText`. These were confirmed against the live server, which names the
+missing property in its validation errors. Field names here are authoritative;
+the Kotlin ones are not.
+
+`consents` must contain the terms entry or the server refuses with `20004`. The
+app also offers a `MarketingMessages` consent; this integration does not send it,
+since signing in should not opt anyone into marketing.
+
+**2. Exchange the code for a token** — `POST account/verifyUserV2`
 
 ```json
-{ "mobilePhone": "...", "personalId": "...", "verificationCode": "1234",
-  "isRegister": false, "consentsToken": "...", "licensePlate": null,
-  "facebookAccessToken": null, "appleIdentityToken": null }
+{ "phoneNumber": "...", "personalId": "...", "verificationCode": "1234",
+  "consentsToken": "..." }
 ```
 
 Returns `{ userInfo, verificationToken, verifiedMobilePhone, needsPersonalInfoReview }`.
+
+This one could not be shape-checked with dummy credentials — with no pending OTP
+session the server returns a 500 rather than a validation error — so `tools/probe.py`
+tries the plausible spellings in turn and records which is accepted.
 
 `userInfo.accessToken` is the long-lived bearer token. The app stores it in
 SharedPreferences under `userAccessToken` and never refreshes it — a new SMS
@@ -117,6 +138,35 @@ login is the only renewal path, so the integration needs a re-auth flow.
 | `hasIturanSafety` | bool | driving-events data available |
 | `evRange` | string? | nominal range |
 | `finishType`, `roleType`, `videoGuide`, `defaultAgency` | | `roleType` is `MainDriver` etc. |
+
+---
+
+## HTTP verbs and error codes
+
+Verbs are not guessable from the path and were confirmed against the live server
+(`405` means the verb is wrong; `401` means the verb is right and auth is missing):
+
+| Endpoint | Verb |
+| --- | --- |
+| `account/generateVerificationCodeV2`, `account/verifyUserV2` | POST |
+| `account/getUserInfo`, `homepage/get`, `car/carExtraInfo` | **GET** |
+| `ituran/getBatteryInfo`, `ituran/getLocation` | POST |
+| `settings/all` | GET, no auth |
+
+Errors arrive as HTTP 200 with a non-zero `errorCode`; only auth failures use a
+real HTTP status.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | success |
+| `10001` | model validation — `errorMessage` names the missing fields, `\|`-separated |
+| `20004` | terms consent missing from the request |
+| `91133` | no account links that phone number and ID |
+| `500` | server-side failure |
+| HTTP `401` | token missing, expired, or rejected |
+
+`10001` is worth knowing: the server lists every missing property by name, which
+makes it a reliable oracle for request shapes without needing a valid account.
 
 ---
 

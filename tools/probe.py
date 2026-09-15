@@ -21,6 +21,7 @@ import re
 import ssl
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid as uuidlib
 from pathlib import Path
@@ -32,6 +33,16 @@ APP_VERSION = "2.2.41"
 # SHA-256 of the app's X.509 signing certificate, lowercase hex. The app computes
 # this at runtime and sends it as X-App-Signature; it is the same for every install.
 APP_SIGNATURE = "efa3a9bbf63b1a7f47895e5924482b004f66c4baf6a2b2665a792631c61f8d5f"
+
+# The server requires the terms-of-use consent to issue a code. Marketing consent
+# ("MarketingMessages") is deliberately not sent - logging in should not opt anyone
+# into marketing. The texts are echoed back empty, exactly as the app does.
+TERMS_CONSENT = {
+    "consentType": "TermsAndPrivacy",
+    "largeText": "",
+    "mediumText": "",
+    "smallText": "",
+}
 
 HERE = Path(__file__).resolve().parent
 RAW_PATH = HERE / "probe-raw.json"
@@ -70,33 +81,30 @@ def headers(token: str | None) -> dict[str, str]:
 
 
 def call(path: str, body: Any = None, token: str | None = None,
-         method: str | None = None) -> tuple[int, Any]:
-    """POST `body` to `path`. Falls back to GET when the server rejects POST."""
-    methods = [method] if method else ["POST", "GET"]
-    last: tuple[int, Any] = (0, None)
-    ctx = ssl.create_default_context()
-    for m in methods:
-        data = json.dumps(body).encode() if (body is not None and m == "POST") else None
-        req = urllib.request.Request(BASE + path, data=data, headers=headers(token), method=m)
-        try:
-            with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
-                raw, status = r.read().decode("utf-8", "replace"), r.status
-        except urllib.error.HTTPError as e:
-            raw, status = e.read().decode("utf-8", "replace"), e.code
-        except urllib.error.URLError as e:
-            raise ApiError(f"network error calling {path}: {e.reason}") from e
-        try:
-            parsed = json.loads(raw) if raw else None
-        except json.JSONDecodeError:
-            parsed = {"_unparsed": raw[:2000]}
-        last = (status, parsed)
-        if status not in (404, 405):
-            break
-    return last
+         method: str = "POST", params: dict[str, Any] | None = None) -> tuple[int, Any]:
+    """Call `path` and return (status, parsed JSON)."""
+    url = BASE + path
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    data = json.dumps(body).encode() if (body is not None and method == "POST") else None
+    req = urllib.request.Request(url, data=data, headers=headers(token), method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=30, context=ssl.create_default_context()) as r:
+            raw, status = r.read().decode("utf-8", "replace"), r.status
+    except urllib.error.HTTPError as e:
+        raw, status = e.read().decode("utf-8", "replace"), e.code
+    except urllib.error.URLError as e:
+        raise ApiError(f"network error calling {path}: {e.reason}") from e
+    try:
+        return status, (json.loads(raw) if raw else None)
+    except json.JSONDecodeError:
+        return status, {"_unparsed": raw[:2000]}
 
 
 def unwrap(path: str, status: int, payload: Any) -> Any:
     """Unwrap the {custom, errorCode, errorMessage, body} envelope."""
+    if status == 401:
+        raise ApiError(f"{path}: HTTP 401 - token rejected")
     if not isinstance(payload, dict):
         raise ApiError(f"{path}: HTTP {status}, unexpected payload {payload!r}")
     if payload.get("errorCode"):
@@ -146,7 +154,7 @@ def redact(value: Any, key: str = "") -> Any:
 
 def main() -> int:
     print("MyTOYOTA Israel API probe")
-    print("=" * 60)
+    print("=" * 62)
     print("Your phone number and ID go only to my-toyota.toyota.co.il.\n")
 
     phone = input("Mobile phone (e.g. 0501234567): ").strip()
@@ -155,40 +163,72 @@ def main() -> int:
 
     results: dict[str, Any] = {"_meta": {"base": BASE, "appVersion": APP_VERSION}}
 
-    def record(name: str, path: str, body: Any = None, token: str | None = None) -> Any:
-        status, payload = call(path, body, token)
-        results[name] = {"path": path, "status": status, "response": payload}
-        print(f"  {name:24} {path:34} HTTP {status}")
+    def record(name: str, path: str, *, body: Any = None, token: str | None = None,
+               method: str = "POST", params: dict[str, Any] | None = None) -> Any:
+        status, payload = call(path, body, token, method, params)
+        results[name] = {"path": path, "method": method, "status": status,
+                         "response": payload}
+        print(f"  {name:24} {method:4} {path:26} HTTP {status}")
         return unwrap(path, status, payload)
 
     try:
-        print("\n[1/6] requesting SMS code ...")
+        print("\n[1/5] requesting SMS code ...")
         otp = record("generateVerificationCode", "account/generateVerificationCodeV2",
-                     {"mobilePhone": phone, "personalId": personal_id,
-                      "isRegister": False, "consents": []})
-        consents_token = (otp or {}).get("consentsToken") if isinstance(otp, dict) else None
+                     body={"phoneNumber": phone, "personalId": personal_id,
+                           "consents": [TERMS_CONSENT]})
+        consents_token = otp.get("consentsToken") if isinstance(otp, dict) else None
         if isinstance(otp, dict) and otp.get("totalTimeoutInSeconds"):
             print(f"        code valid for {otp['totalTimeoutInSeconds']}s")
 
         code = input("\nEnter the SMS code you received: ").strip()
 
-        print("\n[2/6] verifying ...")
-        verified = record("verifyUser", "account/verifyUserV2",
-                          {"mobilePhone": phone, "personalId": personal_id,
-                           "verificationCode": code, "isRegister": False,
-                           "consentsToken": consents_token})
-        if not isinstance(verified, dict):
-            raise ApiError(f"verifyUserV2 returned {verified!r}")
+        # verifyUserV2 could not be shape-checked with dummy data (it 500s when no OTP
+        # session exists), so try the plausible spellings until one is accepted. The
+        # code stays valid for the whole window, so retries cost nothing.
+        print("\n[2/5] verifying ...")
+        candidates = [
+            ("phoneNumber+consentsToken",
+             {"phoneNumber": phone, "personalId": personal_id,
+              "verificationCode": code, "consentsToken": consents_token}),
+            ("phoneNumber+consents",
+             {"phoneNumber": phone, "personalId": personal_id,
+              "verificationCode": code, "consentsToken": consents_token,
+              "consents": [TERMS_CONSENT]}),
+            ("mobilePhone spelling",
+             {"mobilePhone": phone, "personalId": personal_id,
+              "verificationCode": code, "consentsToken": consents_token}),
+            ("code spelling",
+             {"phoneNumber": phone, "personalId": personal_id,
+              "code": code, "consentsToken": consents_token}),
+        ]
+        verified = None
+        for label, body in candidates:
+            status, payload = call("account/verifyUserV2", body, method="POST")
+            err = (payload or {}).get("errorCode") if isinstance(payload, dict) else None
+            msg = (payload or {}).get("errorMessage") if isinstance(payload, dict) else None
+            results[f"verifyUser[{label}]"] = {"path": "account/verifyUserV2",
+                                               "status": status, "response": payload}
+            print(f"  verifyUserV2 ({label:24}) HTTP {status} code={err}")
+            if status == 200 and not err:
+                verified = (payload or {}).get("body")
+                print(f"        accepted with: {label}")
+                results["_verifyShape"] = sorted(body)
+                break
+            if msg:
+                print(f"        -> {msg}")
+        if verified is None:
+            raise ApiError("verifyUserV2 rejected every request shape - see probe-raw.json")
+
         user_info = verified.get("userInfo") or {}
         token = user_info.get("accessToken")
         if not token:
             raise ApiError("no accessToken in verifyUserV2 response - see probe-raw.json")
         SECRETS.append(token)
-        print(f"        got accessToken ({len(token)} chars, starts {token[:6]}...)")
+        print(f"        got accessToken ({len(token)} chars)")
 
-        print("\n[3/6] account + homepage ...")
-        record("getUserInfo", "account/getUserInfo", {}, token)
-        home = record("homepage", "homepage/get", {}, token)
+        print("\n[3/5] account + homepage ...")
+        record("getUserInfo", "account/getUserInfo", token=token, method="GET")
+        home = record("homepage", "homepage/get", token=token, method="GET")
 
         cars: list[dict[str, Any]] = []
         if isinstance(home, dict):
@@ -196,12 +236,14 @@ def main() -> int:
                 car = (item or {}).get("car") or {}
                 if car.get("licensePlate"):
                     cars.append(car)
-        if not cars:
-            for car in user_info.get("carsInfo") or []:
-                if car.get("licensePlate"):
-                    cars.append(car)
+                    if item.get("batteryInfo") is not None:
+                        print("        homepage/get carries batteryInfo inline")
+        for car in user_info.get("carsInfo") or []:
+            if car.get("licensePlate") and not any(
+                    c["licensePlate"] == car["licensePlate"] for c in cars):
+                cars.append(car)
 
-        print(f"\n[4/6] found {len(cars)} car(s)")
+        print(f"\n[4/5] found {len(cars)} car(s)")
         for car in cars:
             print(f"        {car.get('modelInHebrew')} | ignition={car.get('ignitionType')} "
                   f"| hasIturan={car.get('hasIturan')} hasIturanEv={car.get('hasIturanEv')} "
@@ -214,24 +256,27 @@ def main() -> int:
         for idx, car in enumerate(connected):
             plate = car["licensePlate"]
             tag = f"car{idx}"
-            print(f"\n[5/6] telematics for {car.get('modelInHebrew')} ...")
-            for name, path, body in (
+            print(f"\n[5/5] telematics for {car.get('modelInHebrew')} ...")
+            probes: list[tuple[str, str, dict[str, Any]]] = [
                 (f"{tag}_carExtraInfo", "car/carExtraInfo", {"licensePlate": plate}),
                 (f"{tag}_location", "ituran/getLocation",
                  {"plate": plate, "uuid": "", "version": APP_VERSION,
                   "userLatitude": None, "userLongitude": None}),
-                (f"{tag}_battery", "ituran/getBatteryInfo",
-                 {"licensePlate": plate, "uuid": "", "username": "",
-                  "platformId": "Android"}),
-            ):
-                if name.endswith("_battery") and not car.get("hasIturanEv"):
-                    continue
+            ]
+            if car.get("hasIturanEv"):
+                probes.append((f"{tag}_battery", "ituran/getBatteryInfo",
+                               {"licensePlate": plate, "uuid": "", "username": "",
+                                "platformId": "Android"}))
+            for name, path, payload in probes:
                 try:
-                    record(name, path, body, token)
+                    if path.startswith("car/"):
+                        record(name, path, token=token, method="GET", params=payload)
+                    else:
+                        record(name, path, body=payload, token=token, method="POST")
                 except ApiError as e:
                     print(f"        {path} failed: {e}")
 
-        print("\n[6/6] writing results ...")
+        print("\n  done")
 
     except ApiError as e:
         print(f"\n!! {e}")
