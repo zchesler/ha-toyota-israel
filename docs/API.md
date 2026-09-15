@@ -216,6 +216,28 @@ registered client UUID (see *Ituran activation* below).
 | `chargingMinutesLeftTillFullBattery` | int? | time-to-full sensor |
 | `maxChargingCurrentAC` / `maxChargingCurrentDC` | int? | diagnostic |
 
+**The response is not the same shape while charging.** Observed on a C-HR+ on a
+home AC charger:
+
+| Field | Parked | Charging |
+| --- | --- | --- |
+| `isCharging` | false | true |
+| `batteryPercentage` | 92 | 87 |
+| `chargingMinutesLeftTillFullBattery` | null | 90 |
+| `rangeLeftOnBatteryPower` | 382 | **null** |
+| `maxChargingCurrentAC` / `DC` | 22 / 150 | **null** |
+| `isChargingAC` | false | **false** |
+| `chargingCurrent` | null | null |
+
+So only four fields are meaningful during a charge, and three that work while
+parked stop reporting. `isChargingAC` stayed false throughout an AC charge and
+`chargingCurrent` has never been non-null, so treat both as not implemented
+rather than as data — the integration does not expose `isChargingAC` at all.
+
+Static equivalents of the charging rates live in `car/carExtraInfo`
+(`evMaxPowerForAc`, `evMaxPowerForDc`), which keep their values while charging
+and are the better source.
+
 ### Ituran activation
 
 The Ituran data calls are keyed on a per-car client UUID. Without a registered

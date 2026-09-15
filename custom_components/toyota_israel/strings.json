@@ -125,9 +125,6 @@
       "charging": {
         "name": "Charging"
       },
-      "charging_ac": {
-        "name": "Charging on AC"
-      },
       "battery_low": {
         "name": "Battery low"
       },

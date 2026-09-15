@@ -38,16 +38,6 @@ BINARY_SENSORS: tuple[ToyotaBinarySensorDescription, ...] = (
         exists_fn=lambda c: c.has_battery,
     ),
     ToyotaBinarySensorDescription(
-        key="charging_ac",
-        translation_key="charging_ac",
-        available_fn=lambda c: c.battery is not None,
-        device_class=BinarySensorDeviceClass.BATTERY_CHARGING,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        entity_registry_enabled_default=False,
-        value_fn=lambda c: (c.battery or {}).get("isChargingAC"),
-        exists_fn=lambda c: c.has_battery,
-    ),
-    ToyotaBinarySensorDescription(
         key="battery_low",
         translation_key="battery_low",
         available_fn=lambda c: c.battery is not None,

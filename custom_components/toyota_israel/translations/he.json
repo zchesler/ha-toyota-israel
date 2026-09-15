@@ -125,9 +125,6 @@
       "charging": {
         "name": "בטעינה"
       },
-      "charging_ac": {
-        "name": "טעינת AC"
-      },
       "battery_low": {
         "name": "סוללה חלשה"
       },

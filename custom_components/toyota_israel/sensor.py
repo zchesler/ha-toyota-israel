@@ -107,8 +107,12 @@ SENSORS: tuple[ToyotaSensorDescription, ...] = (
         device_class=SensorDeviceClass.POWER,
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
         state_class=SensorStateClass.MEASUREMENT,
-        # Named "current" upstream, but its siblings maxChargingCurrentAC/DC match
-        # the car's kW ratings exactly (22 / 150), so it is power, not amps.
+        entity_category=EntityCategory.DIAGNOSTIC,
+        # chargingCurrent has been null in every observation, including mid-charge
+        # on AC, so this is off by default - enable it if DC charging turns out to
+        # populate it. The unit is inferred: its siblings maxChargingCurrentAC/DC
+        # match the car's kW ratings exactly (22 / 150), so it is power, not amps.
+        entity_registry_enabled_default=False,
         value_fn=lambda c: _number((c.battery or {}).get("chargingCurrent")),
         exists_fn=lambda c: c.has_battery,
     ),
@@ -154,9 +158,10 @@ SENSORS: tuple[ToyotaSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
+        # The battery call nulls these while charging; carExtraInfo does not.
         value_fn=lambda c: (
-            (c.battery or {}).get("maxChargingCurrentAC")
-            or _number(c.extra.get("evMaxPowerForAc"))
+            _number(c.extra.get("evMaxPowerForAc"))
+            or (c.battery or {}).get("maxChargingCurrentAC")
         ),
         exists_fn=lambda c: c.has_battery,
     ),
@@ -168,8 +173,8 @@ SENSORS: tuple[ToyotaSensorDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
         value_fn=lambda c: (
-            (c.battery or {}).get("maxChargingCurrentDC")
-            or _number(c.extra.get("evMaxPowerForDc"))
+            _number(c.extra.get("evMaxPowerForDc"))
+            or (c.battery or {}).get("maxChargingCurrentDC")
         ),
         exists_fn=lambda c: c.has_battery,
     ),
