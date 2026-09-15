@@ -122,6 +122,10 @@ class ToyotaIsraelCoordinator(DataUpdateCoordinator[dict[str, CarData]]):
         self._ituran_plates: dict[str, str] = {}
         # Plates already warned about, so a lost registration is logged once.
         self._lost_warned: set[str] = set()
+        # Plates whose driving report the account cannot read. Some accounts get
+        # 95555 for it even with hasIturanSafety set, and retrying every refresh
+        # spends a request per car on a call that will not start working.
+        self._no_driving_report: set[str] = set()
 
     async def _async_update_data(self) -> dict[str, CarData]:
         try:
@@ -219,10 +223,22 @@ class ToyotaIsraelCoordinator(DataUpdateCoordinator[dict[str, CarData]]):
             except (ToyotaApiError, ToyotaIturanNotRegistered) as err:
                 _LOGGER.debug("getBatteryInfo failed for %s: %s", data.name, err)
 
-        if data.car.get("hasIturanSafety") and data.ituran_plate:
+        if (
+            data.car.get("hasIturanSafety")
+            and data.ituran_plate
+            and plate not in self._no_driving_report
+        ):
             try:
                 data.driving = await self.api.async_get_driving_report(
                     data.ituran_plate, client_uuid, data.ituran_username
                 )
             except (ToyotaApiError, ToyotaIturanNotRegistered) as err:
                 _LOGGER.debug("drivingReport failed for %s: %s", data.name, err)
+            else:
+                if data.driving is None:
+                    _LOGGER.debug(
+                        "no driving report available for %s; not asking again "
+                        "until reload",
+                        data.name,
+                    )
+                    self._no_driving_report.add(plate)
