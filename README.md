@@ -6,60 +6,98 @@ Union Motors (יוניון מוטורס), the Toyota importer in Israel.
 Israel does not use Toyota Motor Europe's connected-services platform, so the
 existing [`ha_toyota`](https://github.com/pytoyoda/ha_toyota) / `pytoyoda`
 integrations cannot talk to it. This one speaks the Israeli backend directly.
+The API it uses is written up in [docs/API.md](docs/API.md).
 
-> **Status: in development.** The API has been mapped (see [docs/API.md](docs/API.md))
-> and verified reachable, but the integration is being validated against a real
-> account before first release. Not yet ready to install.
+## Entities
 
-## What it will expose
+Created per car, and only where that car actually reports the data.
 
-For each car on your account, gated by what that car actually reports:
+| Entity | Needs telematics |
+| --- | --- |
+| Battery level, Charging, Battery low | ✅ EV |
+| Range remaining, Charging time left, Charging power | ✅ EV |
+| Location (`device_tracker`) and location address | ✅ |
+| Safety score, Distance this month | ✅ |
+| **Odometer** | — |
+| Road licence expiry, Insurance reminder, Service booked | — |
+| Battery capacity, Rated range, Max AC/DC charging power | — |
+| Recommended tyre pressures | — |
 
-| Entity | Source | Requires |
-| --- | --- | --- |
-| Battery level (%) | `batteryPercentage` | EV telematics |
-| Charging | `isCharging` | EV telematics |
-| Range remaining | `rangeLeftOnBatteryPower` | EV telematics |
-| Time to full charge | `chargingMinutesLeftTillFullBattery` | EV telematics |
-| Odometer | `lastSpeedometer` / `milage` | telematics |
-| Car location | `ituran/getLocation` | telematics |
-| Driving safety score and events | `ituran/drivingReport` | safety telematics |
-| Next service appointment | `order/nextAppointment` | — |
-
-Cars without Toyota Connect still get the data the account itself carries, such as
-the odometer reading and the next service appointment.
+Rows marked "—" come from the account itself and work on any car, including hybrids
+and petrol models.
 
 ## Requirements
 
-- A MyTOYOTA Israel account (phone number + Israeli ID).
-- For vehicle data: **Toyota Connect** active on the car — the app shows this as
-  `hasIturan`. Battery entities additionally need `hasIturanEv`.
+- A MyTOYOTA Israel account — phone number and Israeli ID.
+- For live vehicle data: **Toyota Connect** active on the car. The app reports this
+  as `hasIturan`; battery entities also need `hasIturanEv`.
+- Home Assistant 2024.12 or newer.
 
-## Setup
+## Installation
 
-Login mirrors the app: enter your phone number and ID, receive an SMS code, enter it.
-Home Assistant then stores the resulting access token. The token does not
-auto-refresh, so the integration will prompt you to sign in again if it stops working.
+**HACS** → Integrations → ⋮ → Custom repositories → add
+`https://github.com/zchesler/ha-toyota-israel` as an *Integration*, then install
+**Toyota Israel** and restart Home Assistant.
+
+Or copy `custom_components/toyota_israel/` into your `config/custom_components/`
+and restart.
+
+Then: Settings → Devices & Services → Add Integration → **Toyota Israel**.
+
+## Signing in
+
+Setup mirrors the app: enter your phone number and Israeli ID, and Toyota sends a
+one-time SMS code. The code is only valid for about a minute.
+
+The token that comes back does not auto-refresh — the app never refreshes it
+either — so if it is ever rejected, Home Assistant will prompt you to sign in again.
+
+## The telematics trade-off, before you enable it
+
+Battery, charging and location are not served by Toyota. They come from the
+**Ituran** (איתוראן) unit in the car, and reading them means registering Home
+Assistant with Ituran using a *second* SMS code, once per car.
+
+**Only one device can hold that registration at a time.** Registering here signs
+the MyTOYOTA app out of live vehicle data, and signing back in on the app takes
+the registration away from Home Assistant. There is no way around this; it is how
+Ituran pairs a client to a car.
+
+So pick one:
+
+- **With telematics** — full battery, charging and location in Home Assistant, and
+  the phone app stops showing live vehicle data until you sign in there again.
+- **Without telematics** — the app keeps working, and Home Assistant still gets the
+  odometer, servicing dates and vehicle specs, which need no registration.
+
+The choice is a step during setup, and **Reconfigure** on the integration switches
+between them later. If the app takes the registration back, the telematics entities
+go unavailable, a warning appears in the log, and Reconfigure claims it again.
+
+## Polling
+
+The default is every 15 minutes, adjustable down to 5 in the integration's options.
+Every request wakes a telematics unit in a car and goes to someone else's
+production server, so prefer longer intervals unless you need the detail.
 
 ## Development
 
-`tools/probe.py` runs the real login flow and records what every endpoint returns,
-writing a full copy and a redacted copy. It is how this integration's data model is
-validated against an actual account:
+`tools/probe.py` runs the real login and records what every endpoint returns, and
+`tools/ituran_activate.py` does the Ituran registration and reads vehicle data. Both
+write a full copy and a redacted copy; the full one is git-ignored.
 
 ```bash
 python tools/probe.py
+python tools/ituran_activate.py
 ```
 
-Your phone number and ID are sent only to `my-toyota.toyota.co.il`, exactly as the
-app sends them. `probe-raw.json` holds your real data and is git-ignored;
-`probe-redacted.json` masks identifying values and is the one safe to share.
+Your details go only to `my-toyota.toyota.co.il`, exactly as the app sends them.
 
 ## Disclaimer
 
-Unofficial and not affiliated with, endorsed by, or supported by Toyota,
-Union Motors, or Ituran. It relies on a private API that can change or break at any
-time. Use it with your own account only.
+Unofficial, and not affiliated with, endorsed by, or supported by Toyota, Union
+Motors, or Ituran. It relies on a private API that can change or break without
+notice. Use it with your own account only.
 
 ## License
 

@@ -1,0 +1,140 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sign in to MyTOYOTA Israel",
+        "description": "Use the same phone number and Israeli ID you use in the MyTOYOTA app. A one-time code will be sent by SMS.",
+        "data": {
+          "phone": "Mobile phone",
+          "personal_id": "Israeli ID"
+        },
+        "data_description": {
+          "phone": "For example 0501234567",
+          "personal_id": "Your teudat zehut, as registered with Union Motors"
+        }
+      },
+      "code": {
+        "title": "Enter the code",
+        "description": "Enter the code sent to {phone}. It expires after about a minute.",
+        "data": {
+          "code": "SMS code"
+        }
+      },
+      "telematics": {
+        "title": "Live vehicle data",
+        "description": "Battery level, charging state and location come from the Ituran unit in {cars}, and reading them means registering Home Assistant with Ituran using a second SMS code.\n\nOnly one device can hold that registration at a time. Turning this on signs the MyTOYOTA app out of live vehicle data, and signing back in on the app takes it away from Home Assistant again.\n\nLeave it off to keep the app working: odometer, servicing dates and vehicle specs do not need it.",
+        "data": {
+          "enable": "Register for live vehicle data"
+        }
+      },
+      "activate": {
+        "title": "Registration failed",
+        "description": "Ituran did not send a code for {car}. Continue to try again."
+      },
+      "activate_code": {
+        "title": "Confirm with Ituran",
+        "description": "Ituran has sent a code for {car}. This is a different code from the one you used to sign in.",
+        "data": {
+          "code": "Ituran SMS code"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sign in again",
+        "description": "The saved token for {phone} is no longer accepted. Signing in again will send a new SMS code."
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the Toyota server. Try again shortly.",
+      "no_account_match": "No account matches that phone number and ID.",
+      "invalid_code": "That code was not accepted. It may have expired.",
+      "ituran_failed": "Ituran did not complete the registration. Try again, or continue without live vehicle data."
+    },
+    "abort": {
+      "already_configured": "This Toyota account is already set up.",
+      "reauth_successful": "Signed in again.",
+      "reconfigure_successful": "Settings updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Polling",
+        "description": "How often to ask Toyota for new data. Every request wakes the telematics unit in the car, so prefer longer intervals unless you need the detail.",
+        "data": {
+          "scan_interval_minutes": "Update interval"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery": {
+        "name": "Battery"
+      },
+      "range": {
+        "name": "Range"
+      },
+      "odometer": {
+        "name": "Odometer"
+      },
+      "charging_time_left": {
+        "name": "Charging time left"
+      },
+      "charging_power": {
+        "name": "Charging power"
+      },
+      "location_address": {
+        "name": "Location address"
+      },
+      "battery_capacity": {
+        "name": "Battery capacity"
+      },
+      "rated_range": {
+        "name": "Rated range"
+      },
+      "max_charging_power_ac": {
+        "name": "Max AC charging power"
+      },
+      "max_charging_power_dc": {
+        "name": "Max DC charging power"
+      },
+      "tyre_pressure_front": {
+        "name": "Recommended front tyre pressure"
+      },
+      "tyre_pressure_rear": {
+        "name": "Recommended rear tyre pressure"
+      },
+      "roadworthiness_expiry": {
+        "name": "Road licence expiry"
+      },
+      "insurance_reminder": {
+        "name": "Insurance reminder"
+      },
+      "safety_grade": {
+        "name": "Safety score"
+      },
+      "distance_this_month": {
+        "name": "Distance this month"
+      }
+    },
+    "binary_sensor": {
+      "charging": {
+        "name": "Charging"
+      },
+      "charging_ac": {
+        "name": "Charging on AC"
+      },
+      "battery_low": {
+        "name": "Battery low"
+      },
+      "service_booked": {
+        "name": "Service booked"
+      }
+    },
+    "device_tracker": {
+      "location": {
+        "name": "Location"
+      }
+    }
+  }
+}

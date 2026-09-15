@@ -1,0 +1,140 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "התחברות ל-MY TOYOTA",
+        "description": "הזינו את מספר הטלפון ותעודת הזהות שאיתם אתם מתחברים לאפליקציית MY TOYOTA. יישלח אליכם קוד חד-פעמי ב-SMS.",
+        "data": {
+          "phone": "טלפון נייד",
+          "personal_id": "תעודת זהות"
+        },
+        "data_description": {
+          "phone": "לדוגמה 0501234567",
+          "personal_id": "כפי שרשומה ביוניון מוטורס"
+        }
+      },
+      "code": {
+        "title": "הזנת הקוד",
+        "description": "הזינו את הקוד שנשלח אל {phone}. הקוד בתוקף לכדקה.",
+        "data": {
+          "code": "קוד מה-SMS"
+        }
+      },
+      "telematics": {
+        "title": "נתוני רכב בזמן אמת",
+        "description": "מצב הסוללה, הטעינה והמיקום מגיעים מיחידת איתוראן שב{cars}, וכדי לקרוא אותם צריך לרשום את Home Assistant מול איתוראן באמצעות קוד SMS נוסף.\n\nרק מכשיר אחד יכול להיות רשום בכל רגע. הפעלת האפשרות תנתק את אפליקציית MY TOYOTA מנתוני הרכב החיים, והתחברות מחדש באפליקציה תיקח את הרישום חזרה מ-Home Assistant.\n\nאפשר להשאיר מכובה כדי שהאפליקציה תמשיך לעבוד: מד האוץ, מועדי הטיפולים ומפרט הרכב לא דורשים את הרישום.",
+        "data": {
+          "enable": "רישום לנתוני רכב בזמן אמת"
+        }
+      },
+      "activate": {
+        "title": "הרישום נכשל",
+        "description": "איתוראן לא שלחה קוד עבור {car}. המשיכו כדי לנסות שוב."
+      },
+      "activate_code": {
+        "title": "אישור מול איתוראן",
+        "description": "איתוראן שלחה קוד עבור {car}. זהו קוד שונה מזה שאיתו התחברתם.",
+        "data": {
+          "code": "קוד מאיתוראן"
+        }
+      },
+      "reauth_confirm": {
+        "title": "התחברות מחדש",
+        "description": "הטוקן השמור עבור {phone} כבר לא מתקבל. התחברות מחדש תשלח קוד SMS חדש."
+      }
+    },
+    "error": {
+      "cannot_connect": "לא הצלחנו להגיע לשרת של טויוטה. נסו שוב בעוד רגע.",
+      "no_account_match": "לא נמצא חשבון שמתאים לטלפון ולתעודת הזהות האלה.",
+      "invalid_code": "הקוד לא התקבל. ייתכן שפג תוקפו.",
+      "ituran_failed": "איתוראן לא השלימה את הרישום. נסו שוב, או המשיכו בלי נתוני רכב בזמן אמת."
+    },
+    "abort": {
+      "already_configured": "חשבון הטויוטה הזה כבר מוגדר.",
+      "reauth_successful": "ההתחברות חודשה.",
+      "reconfigure_successful": "ההגדרות עודכנו."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "תדירות עדכון",
+        "description": "כל כמה זמן לבקש נתונים מטויוטה. כל בקשה מעירה את יחידת התקשורת ברכב, לכן עדיף מרווח ארוך אלא אם באמת צריך רזולוציה גבוהה.",
+        "data": {
+          "scan_interval_minutes": "מרווח עדכון"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery": {
+        "name": "סוללה"
+      },
+      "range": {
+        "name": "טווח נותר"
+      },
+      "odometer": {
+        "name": "מד אוץ"
+      },
+      "charging_time_left": {
+        "name": "זמן לסיום טעינה"
+      },
+      "charging_power": {
+        "name": "הספק טעינה"
+      },
+      "location_address": {
+        "name": "כתובת הרכב"
+      },
+      "battery_capacity": {
+        "name": "קיבולת סוללה"
+      },
+      "rated_range": {
+        "name": "טווח נומינלי"
+      },
+      "max_charging_power_ac": {
+        "name": "הספק טעינה מרבי AC"
+      },
+      "max_charging_power_dc": {
+        "name": "הספק טעינה מרבי DC"
+      },
+      "tyre_pressure_front": {
+        "name": "לחץ אוויר מומלץ קדמי"
+      },
+      "tyre_pressure_rear": {
+        "name": "לחץ אוויר מומלץ אחורי"
+      },
+      "roadworthiness_expiry": {
+        "name": "תוקף רישיון רכב"
+      },
+      "insurance_reminder": {
+        "name": "תזכורת ביטוח"
+      },
+      "safety_grade": {
+        "name": "ציון נהיגה"
+      },
+      "distance_this_month": {
+        "name": "ק\"מ החודש"
+      }
+    },
+    "binary_sensor": {
+      "charging": {
+        "name": "בטעינה"
+      },
+      "charging_ac": {
+        "name": "טעינת AC"
+      },
+      "battery_low": {
+        "name": "סוללה חלשה"
+      },
+      "service_booked": {
+        "name": "טיפול מתוזמן"
+      }
+    },
+    "device_tracker": {
+      "location": {
+        "name": "מיקום"
+      }
+    }
+  }
+}
