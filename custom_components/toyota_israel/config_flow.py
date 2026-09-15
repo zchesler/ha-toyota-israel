@@ -41,12 +41,15 @@ from .api import (
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_CAR_UUIDS,
+    CONF_CHARGING_SCAN_INTERVAL_MINUTES,
     CONF_PERSONAL_ID,
     CONF_PHONE,
     CONF_SCAN_INTERVAL_MINUTES,
     CONF_TELEMATICS,
+    DEFAULT_CHARGING_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    MIN_CHARGING_SCAN_INTERVAL,
     MIN_SCAN_INTERVAL,
 )
 from .coordinator import ToyotaIsraelConfigEntry
@@ -307,16 +310,21 @@ class ToyotaIsraelOptionsFlow(OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(data=user_input)
 
-        current = self.config_entry.options.get(
+        options = self.config_entry.options
+        idle = options.get(
             CONF_SCAN_INTERVAL_MINUTES,
             int(DEFAULT_SCAN_INTERVAL.total_seconds() // 60),
+        )
+        charging = options.get(
+            CONF_CHARGING_SCAN_INTERVAL_MINUTES,
+            int(DEFAULT_CHARGING_SCAN_INTERVAL.total_seconds() // 60),
         )
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
                     vol.Required(
-                        CONF_SCAN_INTERVAL_MINUTES, default=current
+                        CONF_SCAN_INTERVAL_MINUTES, default=idle
                     ): NumberSelector(
                         NumberSelectorConfig(
                             min=int(MIN_SCAN_INTERVAL.total_seconds() // 60),
@@ -325,7 +333,18 @@ class ToyotaIsraelOptionsFlow(OptionsFlow):
                             unit_of_measurement="min",
                             mode=NumberSelectorMode.BOX,
                         )
-                    )
+                    ),
+                    vol.Required(
+                        CONF_CHARGING_SCAN_INTERVAL_MINUTES, default=charging
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=int(MIN_CHARGING_SCAN_INTERVAL.total_seconds() // 60),
+                            max=60,
+                            step=1,
+                            unit_of_measurement="min",
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
                 }
             ),
         )

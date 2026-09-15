@@ -80,6 +80,12 @@ The default is every 15 minutes, adjustable down to 5 in the integration's optio
 Every request wakes a telematics unit in a car and goes to someone else's
 production server, so prefer longer intervals unless you need the detail.
 
+**While a car is charging, a second, shorter interval applies** — 5 minutes by
+default, adjustable down to 2. At 15 minutes a charge that starts just after a
+poll goes unreported for a quarter of an hour, which is most of the time you
+actually wanted to watch. The faster rate stops as soon as charging does, so it
+stays bounded.
+
 ## Development
 
 `tools/probe.py` runs the real login and records what every endpoint returns, and

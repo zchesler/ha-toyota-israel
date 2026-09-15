@@ -22,9 +22,11 @@ from .api import (
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_CAR_UUIDS,
+    CONF_CHARGING_SCAN_INTERVAL_MINUTES,
     CONF_PHONE,
     CONF_SCAN_INTERVAL_MINUTES,
     CONF_TELEMATICS,
+    DEFAULT_CHARGING_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     IGNITION_WITH_BATTERY,
@@ -54,6 +56,10 @@ class CarData:
     @property
     def name(self) -> str:
         return self.car.get("modelInHebrew") or self.plate
+
+    @property
+    def is_charging(self) -> bool:
+        return bool((self.battery or {}).get("isCharging"))
 
     @property
     def has_battery(self) -> bool:
@@ -86,12 +92,20 @@ class ToyotaIsraelCoordinator(DataUpdateCoordinator[dict[str, CarData]]):
 
     def __init__(self, hass: HomeAssistant, entry: ToyotaIsraelConfigEntry) -> None:
         minutes = entry.options.get(CONF_SCAN_INTERVAL_MINUTES)
-        interval = timedelta(minutes=minutes) if minutes else DEFAULT_SCAN_INTERVAL
+        self._idle_interval = (
+            timedelta(minutes=minutes) if minutes else DEFAULT_SCAN_INTERVAL
+        )
+        charging_minutes = entry.options.get(CONF_CHARGING_SCAN_INTERVAL_MINUTES)
+        self._charging_interval = (
+            timedelta(minutes=charging_minutes)
+            if charging_minutes
+            else DEFAULT_CHARGING_SCAN_INTERVAL
+        )
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=interval,
+            update_interval=self._idle_interval,
             config_entry=entry,
         )
         self.api = ToyotaIsraelApi(
@@ -139,7 +153,20 @@ class ToyotaIsraelCoordinator(DataUpdateCoordinator[dict[str, CarData]]):
 
         if not result:
             raise UpdateFailed("the account reported no cars")
+
+        self._apply_interval(result)
         return result
+
+    def _apply_interval(self, cars: dict[str, CarData]) -> None:
+        """Poll faster while a car is charging, and back off once it stops."""
+        wanted = (
+            self._charging_interval
+            if any(car.is_charging for car in cars.values())
+            else self._idle_interval
+        )
+        if wanted != self.update_interval:
+            _LOGGER.debug("switching poll interval to %s", wanted)
+            self.update_interval = wanted
 
     async def _async_add_telematics(self, data: CarData) -> None:
         """Fill in location, battery and driving data for one car.

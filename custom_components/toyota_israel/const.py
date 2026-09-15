@@ -34,12 +34,19 @@ TERMS_CONSENT: Final = {
 DEFAULT_SCAN_INTERVAL: Final = timedelta(minutes=15)
 MIN_SCAN_INTERVAL: Final = timedelta(minutes=5)
 
+# While a car is charging the state is worth having promptly - a 15-minute
+# interval routinely reports a charge that started a quarter of an hour ago. The
+# faster rate applies only while charging, so it stays bounded.
+DEFAULT_CHARGING_SCAN_INTERVAL: Final = timedelta(minutes=5)
+MIN_CHARGING_SCAN_INTERVAL: Final = timedelta(minutes=2)
+
 CONF_PHONE: Final = "phone"
 CONF_PERSONAL_ID: Final = "personal_id"
 CONF_ACCESS_TOKEN: Final = "access_token"
 CONF_TELEMATICS: Final = "telematics"
 CONF_CAR_UUIDS: Final = "car_uuids"
 CONF_SCAN_INTERVAL_MINUTES: Final = "scan_interval_minutes"
+CONF_CHARGING_SCAN_INTERVAL_MINUTES: Final = "charging_scan_interval_minutes"
 
 # API error codes. Errors arrive as HTTP 200 with a non-zero errorCode.
 ERR_OK: Final = 0

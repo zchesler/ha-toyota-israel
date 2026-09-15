@@ -59,9 +59,10 @@
     "step": {
       "init": {
         "title": "Polling",
-        "description": "How often to ask Toyota for new data. Every request wakes the telematics unit in the car, so prefer longer intervals unless you need the detail.",
+        "description": "How often to ask Toyota for new data. Every request wakes the telematics unit in the car, so prefer longer intervals unless you need the detail. While a car is charging the faster interval is used instead, so a charge that starts between polls is not missed for a quarter of an hour.",
         "data": {
-          "scan_interval_minutes": "Update interval"
+          "scan_interval_minutes": "Update interval",
+          "charging_scan_interval_minutes": "Update interval while charging"
         }
       }
     }
