@@ -1,5 +1,8 @@
-tools/probe-raw.json
-tools/probe-redacted.json
-__pycache__/
 *.pyc
 .venv/
+__pycache__/
+tools/ituran-raw.json
+tools/ituran-redacted.json
+tools/ituran-state.json
+tools/probe-raw.json
+tools/probe-redacted.json
