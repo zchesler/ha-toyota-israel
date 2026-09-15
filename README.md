@@ -19,7 +19,7 @@ Created per car, and only where that car actually reports the data.
 | Location (`device_tracker`) and location address | ✅ |
 | Safety score, Distance this month | ✅ |
 | **Odometer** | — |
-| Road licence expiry, Insurance reminder, Service booked | — |
+| First registered, Service interval, Insurance reminder, Service booked | — |
 | Battery capacity, Rated range, Max AC/DC charging power | — |
 | Recommended tyre pressures | — |
 

@@ -184,11 +184,20 @@ SENSORS: tuple[ToyotaSensorDescription, ...] = (
         value_fn=lambda c: _number(c.extra.get("backTirePressure")),
     ),
     ToyotaSensorDescription(
-        key="roadworthiness_expiry",
-        translation_key="roadworthiness_expiry",
+        key="on_road_date",
+        translation_key="on_road_date",
         device_class=SensorDeviceClass.TIMESTAMP,
         entity_category=EntityCategory.DIAGNOSTIC,
+        # "upToRoadDate" is when the car was first registered, not an expiry -
+        # a 2019 model reports 2019 and a car delivered this month reports this
+        # month.
         value_fn=lambda c: _date(c.extra.get("upToRoadDate")),
+    ),
+    ToyotaSensorDescription(
+        key="service_interval",
+        translation_key="service_interval",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda c: c.extra.get("treatmentInterval") or None,
     ),
     ToyotaSensorDescription(
         key="insurance_reminder",

@@ -104,8 +104,11 @@
       "tyre_pressure_rear": {
         "name": "לחץ אוויר מומלץ אחורי"
       },
-      "roadworthiness_expiry": {
-        "name": "תוקף רישיון רכב"
+      "on_road_date": {
+        "name": "עלה לכביש"
+      },
+      "service_interval": {
+        "name": "מרווח טיפולים"
       },
       "insurance_reminder": {
         "name": "תזכורת ביטוח"

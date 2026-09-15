@@ -104,8 +104,11 @@
       "tyre_pressure_rear": {
         "name": "Recommended rear tyre pressure"
       },
-      "roadworthiness_expiry": {
-        "name": "Road licence expiry"
+      "on_road_date": {
+        "name": "First registered"
+      },
+      "service_interval": {
+        "name": "Service interval"
       },
       "insurance_reminder": {
         "name": "Insurance reminder"
