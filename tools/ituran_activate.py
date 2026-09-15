@@ -95,29 +95,42 @@ def main() -> int:
         return (payload or {}).get("body"), code
 
     try:
-        if not reused:
-            print("\n[1/3] activating ...")
-            body, code = record("activate", "ituran/activate",
-                                {"phoneNumber": phone, "plate": plate, "key": client_uuid})
+        def activate(tag: str) -> None:
+            nonlocal client_uuid
+            client_uuid = str(uuidlib.uuid4())
+            print(f"\n[activate] registering {client_uuid}")
+            body, _ = record(f"activate{tag}", "ituran/activate",
+                             {"phoneNumber": phone, "plate": plate, "key": client_uuid})
             if isinstance(body, dict):
                 print(f"        didRecognizeOwner = {body.get('didRecognizeOwner')}")
-
             otp = input("\nEnter the Ituran SMS code (blank to skip verify): ").strip()
             if otp:
-                print("\n[2/3] verifying ...")
-                record("verify", "ituran/verify",
+                record(f"verify{tag}", "ituran/verify",
                        {"phoneNumber": phone, "plate": plate, "otpCode": otp})
-            else:
-                print("\n[2/3] skipped")
+
+        def read_location(tag: str = "") -> tuple[Any, Any]:
+            return record(f"location{tag}", "ituran/getLocation",
+                          {"plate": plate, "uuid": client_uuid,
+                           "version": probe.APP_VERSION,
+                           "userLatitude": None, "userLongitude": None})
+
+        if not reused:
+            activate("")
 
         # getLocation has to come first: its response carries the Ituran service
         # userName, and that - not the phone number - is what the other Ituran
         # calls expect as `username`. The app builds its IturanCarUdid the same way.
-        print("\n[3/3] reading vehicle data with the registered UUID ...")
-        loc, loc_code = record("location", "ituran/getLocation",
-                               {"plate": plate, "uuid": client_uuid,
-                                "version": probe.APP_VERSION,
-                                "userLatitude": None, "userLongitude": None})
+        print("\n[data] reading vehicle data with the registered UUID ...")
+        loc, loc_code = read_location()
+
+        # 92001 on a UUID that worked before means something else registered for
+        # this car - most likely the phone app was signed in again.
+        if loc_code == 92001 and reused:
+            print("\n  This UUID is no longer registered - the phone app has probably"
+                  "\n  re-registered for this car since the last run.")
+            if input("  Register again? [y/N] ").strip().lower().startswith("y"):
+                activate("2")
+                loc, loc_code = read_location("2")
 
         user_name = (loc or {}).get("userName") if isinstance(loc, dict) else None
         if isinstance(loc, dict):
@@ -130,10 +143,20 @@ def main() -> int:
         else:
             print("        no userName in the response - the calls below will likely fail")
 
+        # Ituran's own plate spelling, which getLocation echoes back. drivingReport
+        # is keyed on this one (the app passes IturanCarUdid.carNo), not on the
+        # plate Toyota reports.
+        ituran_plate = (loc or {}).get("licensePlate") if isinstance(loc, dict) else None
+        if ituran_plate and ituran_plate != plate:
+            print(f"        note: Ituran spells the plate differently "
+                  f"({len(plate)} chars -> {len(ituran_plate)})")
+
         if car.get("hasIturanEv"):
+            # platformId really is the Ituran userName again - the app reads
+            # getUserName twice and passes it for both fields.
             bat, _ = record("battery", "ituran/getBatteryInfo",
                             {"licensePlate": plate, "uuid": client_uuid,
-                             "username": user_name or phone, "platformId": "Android"})
+                             "username": user_name, "platformId": user_name})
             if isinstance(bat, dict):
                 print(f"        fields returned: {', '.join(sorted(bat))}")
                 print(f"        battery={bat.get('batteryPercentage')}%  "
@@ -143,10 +166,12 @@ def main() -> int:
 
         if car.get("hasIturanSafety"):
             rep, _ = record("drivingReport", "ituran/drivingReport",
-                            {"plateNumber": plate, "uuid": client_uuid,
-                             "username": user_name or phone, "reportPeriod": "Month"})
+                            {"plateNumber": ituran_plate or plate, "uuid": client_uuid,
+                             "username": user_name, "reportPeriod": "Month"})
             if isinstance(rep, dict):
                 print(f"        fields returned: {', '.join(sorted(rep))}")
+                print(f"        safetyGrade={rep.get('safetyGrade')}  "
+                      f"totalKM={rep.get('totalKM')}  events={rep.get('safetyEvents')}")
 
         record("carExtraInfo", "car/carExtraInfo", {"plateNumber": plate}, method="GET")
 
