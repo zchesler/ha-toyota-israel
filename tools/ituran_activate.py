@@ -80,15 +80,18 @@ def main() -> int:
 
     results: dict[str, Any] = {"_meta": {"plate_len": len(plate), "uuid": client_uuid}}
 
-    def record(name: str, path: str, body: Any) -> Any:
-        status, payload = probe.call(path, body, token, "POST")
-        results[name] = {"path": path, "status": status, "request_keys": sorted(body),
-                         "response": payload}
+    def record(name: str, path: str, body: Any, method: str = "POST") -> Any:
+        if method == "GET":
+            status, payload = probe.call(path, None, token, "GET", params=body)
+        else:
+            status, payload = probe.call(path, body, token, "POST")
+        results[name] = {"path": path, "method": method, "status": status,
+                         "request_keys": sorted(body), "response": payload}
         code = (payload or {}).get("errorCode")
         msg = (payload or {}).get("errorMessage")
-        print(f"  {name:14} {path:26} HTTP {status} code={code}")
+        print(f"  {name:18} {method:4} {path:26} HTTP {status} code={code}")
         if msg:
-            print(f"                 -> {msg}")
+            print(f"        -> {msg}")
         return (payload or {}).get("body"), code
 
     try:
@@ -107,21 +110,47 @@ def main() -> int:
             else:
                 print("\n[2/3] skipped")
 
+        # getLocation has to come first: its response carries the Ituran service
+        # userName, and that - not the phone number - is what the other Ituran
+        # calls expect as `username`. The app builds its IturanCarUdid the same way.
         print("\n[3/3] reading vehicle data with the registered UUID ...")
-        record("location", "ituran/getLocation",
-               {"plate": plate, "uuid": client_uuid, "version": probe.APP_VERSION,
-                "userLatitude": None, "userLongitude": None})
-        if car.get("hasIturanEv"):
-            record("battery", "ituran/getBatteryInfo",
-                   {"licensePlate": plate, "uuid": client_uuid,
-                    "username": phone, "platformId": "Android"})
-        record("drivingReport", "ituran/drivingReport",
-               {"plateNumber": plate, "uuid": client_uuid, "username": phone,
-                "reportPeriod": "Month"})
-        record("carExtraInfo_probe", "car/carExtraInfo", {"plateNumber": plate})
+        loc, loc_code = record("location", "ituran/getLocation",
+                               {"plate": plate, "uuid": client_uuid,
+                                "version": probe.APP_VERSION,
+                                "userLatitude": None, "userLongitude": None})
 
-        ok = (results.get("location", {}).get("response") or {}).get("errorCode") == 0
-        if ok:
+        user_name = (loc or {}).get("userName") if isinstance(loc, dict) else None
+        if isinstance(loc, dict):
+            print(f"        fields returned: {', '.join(sorted(loc))}")
+            print(f"        milage={loc.get('milage')}  city={loc.get('city')!r}  "
+                  f"head={loc.get('head')}  has_coords={loc.get('lat') is not None}")
+        if user_name:
+            probe.SECRETS.append(user_name)
+            print(f"        Ituran userName recovered ({len(user_name)} chars)")
+        else:
+            print("        no userName in the response - the calls below will likely fail")
+
+        if car.get("hasIturanEv"):
+            bat, _ = record("battery", "ituran/getBatteryInfo",
+                            {"licensePlate": plate, "uuid": client_uuid,
+                             "username": user_name or phone, "platformId": "Android"})
+            if isinstance(bat, dict):
+                print(f"        fields returned: {', '.join(sorted(bat))}")
+                print(f"        battery={bat.get('batteryPercentage')}%  "
+                      f"charging={bat.get('isCharging')}  "
+                      f"range={bat.get('rangeLeftOnBatteryPower')}  "
+                      f"minsToFull={bat.get('chargingMinutesLeftTillFullBattery')}")
+
+        if car.get("hasIturanSafety"):
+            rep, _ = record("drivingReport", "ituran/drivingReport",
+                            {"plateNumber": plate, "uuid": client_uuid,
+                             "username": user_name or phone, "reportPeriod": "Month"})
+            if isinstance(rep, dict):
+                print(f"        fields returned: {', '.join(sorted(rep))}")
+
+        record("carExtraInfo", "car/carExtraInfo", {"plateNumber": plate}, method="GET")
+
+        if loc_code == 0:
             state[plate] = client_uuid
             STATE_PATH.write_text(json.dumps(state, indent=2), encoding="utf-8")
             print(f"\n  UUID registered and saved to {STATE_PATH.name}")
