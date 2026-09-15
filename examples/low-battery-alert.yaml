@@ -1,0 +1,49 @@
+# Alerts when the car is running low, and stays quiet while it is charging.
+#
+# Two ways in: the car's own low-battery flag, which is the manufacturer's
+# threshold rather than one we invent, and a range threshold of your choosing.
+
+alias: Car · low battery or range
+description: >-
+  Notifies on the car's own low-battery flag, or when range drops below the
+  threshold, unless the car is already charging.
+mode: single
+max_exceeded: silent
+
+variables:
+  car_url: /lovelace/car
+
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.my_car_battery_low
+    to: "on"
+    id: battery
+  # numeric_state fires on crossing the threshold, so a range that sits low
+  # does not produce a stream of alerts.
+  - trigger: numeric_state
+    entity_id: sensor.my_car_range
+    below: 60
+    id: range
+
+conditions:
+  - condition: state
+    entity_id: binary_sensor.my_car_charging
+    state: "off"
+
+actions:
+  - variables:
+      pct: "{{ states('sensor.my_car_battery') | float(0) | round(0) | int }}"
+      rng: "{{ states('sensor.my_car_range') | float(0) | round(0) | int }}"
+      reason: >-
+        {{ 'The car reported a low battery' if trigger.id == 'battery'
+           else 'Range dropped below ' ~ trigger.below ~ ' km' }}
+  - action: notify.mobile_app_my_phone
+    data:
+      title: "🪫 Car battery low"
+      message: "{{ reason }}\n{{ pct }}% · {{ rng }} km range"
+      data:
+        tag: car_battery_low
+        importance: high
+        notification_icon: mdi:battery-alert-variant-outline
+        color: "#ef5350"
+        clickAction: "{{ car_url }}"

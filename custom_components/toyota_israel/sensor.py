@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
@@ -22,11 +23,11 @@ from homeassistant.const import (
     UnitOfPressure,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .coordinator import CarData, ToyotaIsraelConfigEntry
+from .coordinator import CarData, ToyotaIsraelConfigEntry, ToyotaIsraelCoordinator
 from .entity import ToyotaIsraelEntity
 
 
@@ -57,6 +58,7 @@ class ToyotaSensorDescription(SensorEntityDescription):
     # answered without a value yields "unknown"; only a source we could not read
     # makes the entity unavailable.
     available_fn: Callable[[CarData], bool] = lambda _: True
+    attrs_fn: Callable[[CarData], dict[str, Any] | None] = lambda _: None
 
 
 SENSORS: tuple[ToyotaSensorDescription, ...] = (
@@ -115,6 +117,37 @@ SENSORS: tuple[ToyotaSensorDescription, ...] = (
         entity_registry_enabled_default=False,
         value_fn=lambda c: _number((c.battery or {}).get("chargingCurrent")),
         exists_fn=lambda c: c.has_battery,
+    ),
+    ToyotaSensorDescription(
+        key="charge_session_energy",
+        translation_key="charge_session_energy",
+        device_class=SensorDeviceClass.ENERGY,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+        value_fn=lambda c: (c.charge.session_energy if c.charge else None),
+        exists_fn=lambda c: c.has_battery,
+        available_fn=lambda c: c.battery is not None,
+    ),
+    ToyotaSensorDescription(
+        key="last_charge_energy",
+        translation_key="last_charge_energy",
+        device_class=SensorDeviceClass.ENERGY,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        suggested_display_precision=2,
+        value_fn=lambda c: (c.charge.last_energy if c.charge else None),
+        exists_fn=lambda c: c.has_battery,
+        attrs_fn=lambda c: (
+            {
+                "battery_energy": c.charge.last_battery_energy,
+                "start_percentage": c.charge.last_start_pct,
+                "end_percentage": c.charge.last_end_pct,
+                "duration_minutes": c.charge.last_duration_min,
+                "finished": c.charge.last_finished,
+            }
+            if c.charge and c.charge.last_energy is not None
+            else None
+        ),
     ),
     ToyotaSensorDescription(
         key="location_address",
@@ -225,6 +258,11 @@ SENSORS: tuple[ToyotaSensorDescription, ...] = (
     ToyotaSensorDescription(
         key="safety_grade",
         translation_key="safety_grade",
+        attrs_fn=lambda c: (
+            dict(events)
+            if isinstance(events := (c.driving or {}).get("safetyEvents"), dict)
+            else None
+        ),
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda c: (c.driving or {}).get("safetyGrade"),
         exists_fn=lambda c: c.driving is not None,
@@ -249,12 +287,28 @@ async def async_setup_entry(
 ) -> None:
     """Set up sensors for every car."""
     coordinator = entry.runtime_data
-    async_add_entities(
+    entities: list[SensorEntity] = [
         ToyotaIsraelSensor(coordinator, plate, description)
         for plate, car in coordinator.data.items()
         for description in SENSORS
         if description.exists_fn(car)
-    )
+    ]
+    entities += [
+        ToyotaTotalChargeEnergy(coordinator, plate, TOTAL_CHARGE_ENERGY)
+        for plate, car in coordinator.data.items()
+        if car.has_battery
+    ]
+    async_add_entities(entities)
+
+
+TOTAL_CHARGE_ENERGY = SensorEntityDescription(
+    key="total_charge_energy",
+    translation_key="total_charge_energy",
+    device_class=SensorDeviceClass.ENERGY,
+    native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+    state_class=SensorStateClass.TOTAL_INCREASING,
+    suggested_display_precision=2,
+)
 
 
 class ToyotaIsraelSensor(ToyotaIsraelEntity, SensorEntity):
@@ -275,7 +329,49 @@ class ToyotaIsraelSensor(ToyotaIsraelEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        if self.entity_description.key != "safety_grade":
-            return None
-        events = (self.car.driving or {}).get("safetyEvents") if self.car else None
-        return dict(events) if isinstance(events, dict) else None
+        car = self.car
+        return self.entity_description.attrs_fn(car) if car else None
+
+
+class ToyotaTotalChargeEnergy(ToyotaIsraelEntity, RestoreSensor):
+    """Running total of estimated charge energy, for the Energy dashboard.
+
+    Accumulated here rather than in the coordinator so the figure survives a
+    restart: the coordinator's session counter starts from zero again, while this
+    entity restores the total it had reached.
+    """
+
+    def __init__(
+        self,
+        coordinator: ToyotaIsraelCoordinator,
+        plate: str,
+        description: SensorEntityDescription,
+    ) -> None:
+        super().__init__(coordinator, plate, description)
+        self._total = 0.0
+        self._seen_completed = 0
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if (last := await self.async_get_last_sensor_data()) and (
+            last.native_value is not None
+        ):
+            self._total = float(last.native_value)
+        # Anchor on the counter as it stands now, so sessions already counted
+        # before this entity loaded are not added a second time.
+        car = self.car
+        self._seen_completed = car.charge.completed if car and car.charge else 0
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        car = self.car
+        charge = car.charge if car else None
+        if charge and charge.completed > self._seen_completed:
+            if charge.last_energy:
+                self._total += charge.last_energy
+            self._seen_completed = charge.completed
+        super()._handle_coordinator_update()
+
+    @property
+    def native_value(self) -> float:
+        return round(self._total, 2)

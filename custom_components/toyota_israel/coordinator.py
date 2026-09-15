@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import (
     ToyotaApiError,
@@ -22,10 +23,12 @@ from .api import (
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_CAR_UUIDS,
+    CONF_CHARGING_EFFICIENCY,
     CONF_CHARGING_SCAN_INTERVAL_MINUTES,
     CONF_PHONE,
     CONF_SCAN_INTERVAL_MINUTES,
     CONF_TELEMATICS,
+    DEFAULT_CHARGING_EFFICIENCY,
     DEFAULT_CHARGING_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -33,6 +36,44 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _as_float(value: Any) -> float | None:
+    """Coerce the API's stringly-typed numbers; None when there is nothing usable."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number or None
+
+
+@dataclass
+class ChargeState:
+    """Charge sessions inferred from the battery percentage.
+
+    The API reports no power or energy figure - only a percentage and a charging
+    flag - so a session is bracketed by isCharging and its energy derived from the
+    percentage gained against the car's battery capacity, then divided by the
+    charging efficiency to approximate what the socket actually delivered. That
+    makes it an estimate, not a meter reading: percentages arrive as whole
+    numbers, so a 77 kWh battery quantises to about 0.77 kWh per step.
+    """
+
+    charging: bool = False
+    start_pct: float | None = None
+    start_time: datetime | None = None
+    session_energy: float | None = None
+    last_energy: float | None = None
+    last_battery_energy: float | None = None
+    last_start_pct: float | None = None
+    last_end_pct: float | None = None
+    last_duration_min: int | None = None
+    last_finished: datetime | None = None
+    # Counts finished sessions so the cumulative sensor can add each one exactly
+    # once without needing to diff its own state.
+    completed: int = 0
 
 
 @dataclass
@@ -48,6 +89,7 @@ class CarData:
     ituran_username: str | None = None
     ituran_plate: str | None = None
     telematics_lost: bool = False
+    charge: ChargeState | None = None
 
     @property
     def plate(self) -> str:
@@ -95,6 +137,10 @@ class ToyotaIsraelCoordinator(DataUpdateCoordinator[dict[str, CarData]]):
         self._idle_interval = (
             timedelta(minutes=minutes) if minutes else DEFAULT_SCAN_INTERVAL
         )
+        efficiency = entry.options.get(
+            CONF_CHARGING_EFFICIENCY, DEFAULT_CHARGING_EFFICIENCY
+        )
+        self._efficiency = max(float(efficiency), 1.0) / 100
         charging_minutes = entry.options.get(CONF_CHARGING_SCAN_INTERVAL_MINUTES)
         self._charging_interval = (
             timedelta(minutes=charging_minutes)
@@ -122,6 +168,7 @@ class ToyotaIsraelCoordinator(DataUpdateCoordinator[dict[str, CarData]]):
         self._ituran_plates: dict[str, str] = {}
         # Plates already warned about, so a lost registration is logged once.
         self._lost_warned: set[str] = set()
+        self._charge: dict[str, ChargeState] = {}
         # Plates whose driving report the account cannot read. Some accounts get
         # 95555 for it even with hasIturanSafety set, and retrying every refresh
         # spends a request per car on a call that will not start working.
@@ -153,6 +200,7 @@ class ToyotaIsraelCoordinator(DataUpdateCoordinator[dict[str, CarData]]):
 
             if self._telematics and car.get("hasIturan"):
                 await self._async_add_telematics(data)
+            data.charge = self._track_charge(data)
             result[plate] = data
 
         if not result:
@@ -160,6 +208,48 @@ class ToyotaIsraelCoordinator(DataUpdateCoordinator[dict[str, CarData]]):
 
         self._apply_interval(result)
         return result
+
+    def _track_charge(self, data: CarData) -> ChargeState | None:
+        """Bracket charge sessions and estimate the energy each one took."""
+        battery = data.battery or {}
+        pct = battery.get("batteryPercentage")
+        capacity = _as_float(data.extra.get("evBatteryCapacity"))
+        if not isinstance(pct, (int, float)) or isinstance(pct, bool) or not capacity:
+            return self._charge.get(data.plate)
+
+        state = self._charge.setdefault(data.plate, ChargeState())
+        charging = bool(battery.get("isCharging"))
+        now = dt_util.utcnow()
+        pct = float(pct)
+
+        if charging and not state.charging:
+            state.start_pct = pct
+            state.start_time = now
+
+        if charging and state.start_pct is not None:
+            gained = max(0.0, (pct - state.start_pct) / 100 * capacity)
+            state.session_energy = round(gained / self._efficiency, 2)
+        elif not charging:
+            state.session_energy = None
+
+        if not charging and state.charging and state.start_pct is not None:
+            gained = max(0.0, (pct - state.start_pct) / 100 * capacity)
+            state.last_battery_energy = round(gained, 2)
+            state.last_energy = round(gained / self._efficiency, 2)
+            state.last_start_pct = state.start_pct
+            state.last_end_pct = pct
+            state.last_duration_min = (
+                int((now - state.start_time).total_seconds() // 60)
+                if state.start_time
+                else None
+            )
+            state.last_finished = now
+            state.completed += 1
+            state.start_pct = None
+            state.start_time = None
+
+        state.charging = charging
+        return state
 
     def _apply_interval(self, cars: dict[str, CarData]) -> None:
         """Poll faster while a car is charging, and back off once it stops."""

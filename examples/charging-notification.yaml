@@ -1,0 +1,151 @@
+# A single quiet notification that follows a charge from start to finish.
+#
+# While charging, one notification carries a progress bar that moves in place
+# rather than a new alert every few minutes. When charging stops, the same run
+# replaces it with a summary — or a warning, if it stopped short of the target.
+#
+# It deliberately does NOT call homeassistant.update_entity: the integration
+# already polls faster while charging, and forcing refreshes on top of that
+# multiplies the load on Toyota's servers for no extra detail.
+
+alias: Car · charging progress and summary
+description: >-
+  Live progress bar while the car charges, then a summary when it stops.
+  Reads cached state; the integration handles its own faster polling.
+mode: single
+max_exceeded: silent
+
+variables:
+  notify_tag: car_charging
+  car_url: /lovelace/car
+
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.my_car_charging
+    to: "on"
+    id: started
+  - trigger: homeassistant
+    event: start
+    id: ha_start
+
+conditions:
+  - condition: state
+    entity_id: binary_sensor.my_car_charging
+    state: "on"
+
+actions:
+  - variables:
+      start_pct: "{{ states('sensor.my_car_battery') | float(0) }}"
+      start_ts: "{{ now().timestamp() }}"
+
+  - repeat:
+      while:
+        # "not off" rather than "is on", so a momentary unknown or unavailable
+        # does not end the loop and fire a false "interrupted".
+        - condition: not
+          conditions:
+            - condition: state
+              entity_id: binary_sensor.my_car_charging
+              state: "off"
+        - "{{ repeat.index <= 720 }}"
+      sequence:
+        - variables:
+            pct: "{{ states('sensor.my_car_battery') | float(start_pct | float(0)) }}"
+            elapsed_min: "{{ (now().timestamp() - (start_ts | float(0))) / 60 }}"
+            native_eta: "{{ states('sensor.my_car_charging_time_left') | int(-1) }}"
+            # Fallback when the API reports no time-to-full: extrapolate from
+            # how fast the percentage has actually climbed.
+            calc_eta: >-
+              {% set gained = (pct | float(0)) - (start_pct | float(0)) %}
+              {% set mins = elapsed_min | float(0) %}
+              {% if mins >= 5 and gained > 0 %}
+              {{ ((100 - (pct | float(0))) / (gained / mins)) | round(0) | int }}
+              {% else %}-1{% endif %}
+            eta_min: >-
+              {{ (native_eta | int(-1)) if (native_eta | int(-1)) > 0
+                 else (calc_eta | int(-1)) }}
+            eta_text: >-
+              {% set m = eta_min | int(-1) %}
+              {% if m <= 0 %}Estimating…
+              {% elif m < 60 %}{{ m }} min to full
+              {% else %}{{ m // 60 }}h {{ '%02d' % (m % 60) }}m to full{% endif %}
+            # Range stops being reported while charging, so skip it when absent
+            # instead of printing a zero.
+            detail: >-
+              {% set r = states('sensor.my_car_range') | float(-1) %}
+              {% if r > 0 %}{{ '\n' }}{{ r | round(0) | int }} km range{% endif %}
+        - action: notify.mobile_app_my_phone
+          data:
+            title: "🔋 Charging · {{ pct | round(0) | int }}%"
+            message: "{{ eta_text }}{{ detail }}"
+            data:
+              # Same tag every round, so one notification updates in place.
+              tag: "{{ notify_tag }}"
+              importance: low
+              sticky: true
+              progress: "{{ pct | round(0) | int }}"
+              progress_max: 100
+              progress_indeterminate: false
+              notification_icon: mdi:ev-station
+              color: "#26c6da"
+              clickAction: "{{ car_url }}"
+        # Matches the integration's charging interval, so each round has
+        # something new to show.
+        - delay: "00:02:00"
+
+  # Only reached by the loop ending; confirm it ended because charging stopped
+  # and not because the 24-hour cap was hit.
+  - condition: state
+    entity_id: binary_sensor.my_car_charging
+    state: "off"
+
+  - variables:
+      end_pct: "{{ states('sensor.my_car_battery') | float(start_pct | float(0)) }}"
+      gained: "{{ ((end_pct | float(0)) - (start_pct | float(0))) | round(0) | int }}"
+      dur_min: "{{ ((now().timestamp() - (start_ts | float(0))) / 60) | round(0) | int }}"
+      dur_text: >-
+        {% set d = dur_min | int(0) %}
+        {% if d < 60 %}{{ d }} min{% else %}{{ d // 60 }}h {{ '%02d' % (d % 60) }}m{% endif %}
+      # The integration works this out from the percentage gained and the car's
+      # battery capacity, already adjusted for charging efficiency.
+      kwh: "{{ states('sensor.my_car_last_charge_energy') | float(0) | round(1) }}"
+
+  - choose:
+      - conditions:
+          # numeric_state takes a number or an entity_id here - not a template.
+          # An input_number makes the target adjustable without editing YAML;
+          # a plain number like `below: 80` works just as well.
+          - condition: numeric_state
+            entity_id: sensor.my_car_battery
+            below: input_number.car_charge_target
+        sequence:
+          - action: notify.mobile_app_my_phone
+            data:
+              title: "⚠️ Charging stopped early"
+              message: >-
+                Stopped at {{ end_pct | round(0) | int }}%, target
+                {{ states('input_number.car_charge_target') | float(80) | round(0) | int }}%
+                · +{{ gained }}% in {{ dur_text }} · ~{{ kwh }} kWh
+              data:
+                tag: "{{ notify_tag }}"
+                importance: high
+                progress: -1
+                sticky: false
+                notification_icon: mdi:ev-plug-type2
+                color: "#ff9800"
+                clickAction: "{{ car_url }}"
+    default:
+      - action: notify.mobile_app_my_phone
+        data:
+          title: "✅ Charging complete"
+          message: >-
+            {{ end_pct | round(0) | int }}% · +{{ gained }}% in {{ dur_text }}
+            · ~{{ kwh }} kWh
+          data:
+            tag: "{{ notify_tag }}"
+            importance: default
+            progress: -1
+            sticky: false
+            notification_icon: mdi:check-circle
+            color: "#4caf50"
+            clickAction: "{{ car_url }}"

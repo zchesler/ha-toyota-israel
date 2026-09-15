@@ -47,6 +47,7 @@ CONF_TELEMATICS: Final = "telematics"
 CONF_CAR_UUIDS: Final = "car_uuids"
 CONF_SCAN_INTERVAL_MINUTES: Final = "scan_interval_minutes"
 CONF_CHARGING_SCAN_INTERVAL_MINUTES: Final = "charging_scan_interval_minutes"
+CONF_CHARGING_EFFICIENCY: Final = "charging_efficiency"
 
 # API error codes. Errors arrive as HTTP 200 with a non-zero errorCode.
 ERR_OK: Final = 0
@@ -60,6 +61,11 @@ ERR_ITURAN_NO_PLATE_LINK: Final = 95555
 # Values the app colours its battery gauge with, from settings/all.
 BATTERY_LOW: Final = 15
 BATTERY_MEDIUM: Final = 49
+
+# Share of energy drawn from the socket that reaches the battery. The API reports
+# no power figure at all, so charge energy is derived from the battery percentage
+# and scaled by this to approximate what the meter actually saw.
+DEFAULT_CHARGING_EFFICIENCY: Final = 90
 
 IGNITION_ELECTRIC: Final = "Electric"
 IGNITION_PLUGIN: Final = "PlugIn"

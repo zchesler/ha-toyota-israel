@@ -16,6 +16,7 @@ Created per car, and only where that car actually reports the data.
 | --- | --- |
 | Battery level, Charging, Battery low | ✅ EV |
 | Range remaining, Charging time left, Charging power | ✅ EV |
+| Charge session energy, Last charge energy, Total charge energy | ✅ EV |
 | Location (`device_tracker`) and location address | ✅ |
 | Safety score, Distance this month | ✅ |
 | **Odometer** | — |
@@ -78,6 +79,30 @@ So pick one:
 The choice is a step during setup, and **Reconfigure** on the integration switches
 between them later. If the app takes the registration back, the telematics entities
 go unavailable, a warning appears in the log, and Reconfigure claims it again.
+
+## Charge energy and cost
+
+The API reports no power or energy figure — only a battery percentage and a
+charging flag. So a charge session is bracketed by that flag, and its energy
+worked out from the percentage gained against the car's battery capacity, then
+divided by the charging efficiency (90% by default, adjustable in the options) to
+approximate what the socket actually delivered.
+
+Treat it as an estimate, not a meter reading. Percentages arrive as whole numbers,
+so on a 77 kWh battery each step is about 0.77 kWh — fine over a long charge,
+coarse over a short one.
+
+**Total charge energy** is cumulative and can be added to Home Assistant's Energy
+dashboard (Settings → Dashboards → Energy → Add device). Put your tariff in there
+and Home Assistant works out the cost itself, including time-of-use rates. That is
+why this integration has no price setting of its own: electricity pricing belongs
+to your account, not to the car, and the Energy dashboard already models it far
+better than a single number could.
+
+## Example automations
+
+[examples/](examples/) has working automations to copy: a live charging
+notification with a progress bar, a low-battery alert, and a plug-in reminder.
 
 ## Polling
 

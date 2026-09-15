@@ -1,0 +1,58 @@
+# Reminds you to plug in, but only when it would actually help: the car is home,
+# not already charging, and low enough to be worth it.
+
+alias: Car · plug-in reminder
+description: >-
+  Reminds you to plug in when the car is home, unplugged and below the
+  threshold. Fires in the evening, and on arriving home during evening hours.
+mode: single
+max_exceeded: silent
+
+variables:
+  car_url: /lovelace/car
+
+triggers:
+  - trigger: time
+    at: "21:00:00"
+    id: evening
+  - trigger: state
+    entity_id: device_tracker.my_car_location
+    to: home
+    # A few minutes of settling, so a GPS jump does not trigger a false arrival.
+    for: "00:03:00"
+    id: arrived
+
+conditions:
+  - condition: state
+    entity_id: device_tracker.my_car_location
+    state: home
+  - condition: state
+    entity_id: binary_sensor.my_car_charging
+    state: "off"
+  - condition: numeric_state
+    entity_id: sensor.my_car_battery
+    below: 50
+  # The nightly trigger always passes; the arrival trigger is held to the
+  # evening so it does not nag during the day.
+  - condition: or
+    conditions:
+      - condition: trigger
+        id: evening
+      - condition: time
+        after: "17:00:00"
+        before: "23:00:00"
+
+actions:
+  - variables:
+      pct: "{{ states('sensor.my_car_battery') | float(0) | round(0) | int }}"
+      rng: "{{ states('sensor.my_car_range') | float(0) | round(0) | int }}"
+  - action: notify.mobile_app_my_phone
+    data:
+      title: "🔌 Plug the car in?"
+      message: "Home and not charging\n{{ pct }}% · {{ rng }} km range"
+      data:
+        tag: car_plug_reminder
+        importance: default
+        notification_icon: mdi:ev-plug-type2
+        color: "#ffb300"
+        clickAction: "{{ car_url }}"
