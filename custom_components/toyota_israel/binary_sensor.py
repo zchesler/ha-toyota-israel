@@ -24,12 +24,15 @@ class ToyotaBinarySensorDescription(BinarySensorEntityDescription):
 
     value_fn: Callable[[CarData], bool | None]
     exists_fn: Callable[[CarData], bool] = lambda _: True
+    # See the note in sensor.py: absent value means "unknown", not "unavailable".
+    available_fn: Callable[[CarData], bool] = lambda _: True
 
 
 BINARY_SENSORS: tuple[ToyotaBinarySensorDescription, ...] = (
     ToyotaBinarySensorDescription(
         key="charging",
         translation_key="charging",
+        available_fn=lambda c: c.battery is not None,
         device_class=BinarySensorDeviceClass.BATTERY_CHARGING,
         value_fn=lambda c: (c.battery or {}).get("isCharging"),
         exists_fn=lambda c: c.has_battery,
@@ -37,6 +40,7 @@ BINARY_SENSORS: tuple[ToyotaBinarySensorDescription, ...] = (
     ToyotaBinarySensorDescription(
         key="charging_ac",
         translation_key="charging_ac",
+        available_fn=lambda c: c.battery is not None,
         device_class=BinarySensorDeviceClass.BATTERY_CHARGING,
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
@@ -46,6 +50,7 @@ BINARY_SENSORS: tuple[ToyotaBinarySensorDescription, ...] = (
     ToyotaBinarySensorDescription(
         key="battery_low",
         translation_key="battery_low",
+        available_fn=lambda c: c.battery is not None,
         device_class=BinarySensorDeviceClass.BATTERY,
         value_fn=lambda c: (
             None
@@ -91,4 +96,6 @@ class ToyotaIsraelBinarySensor(ToyotaIsraelEntity, BinarySensorEntity):
 
     @property
     def available(self) -> bool:
-        return super().available and self.is_on is not None
+        if not super().available or (car := self.car) is None:
+            return False
+        return self.entity_description.available_fn(car)

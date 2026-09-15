@@ -26,6 +26,11 @@ Created per car, and only where that car actually reports the data.
 Rows marked "—" come from the account itself and work on any car, including hybrids
 and petrol models.
 
+A sensor reads `unknown` when the server answered without a value for it, and
+`unavailable` only when the source could not be read at all. Range, for instance,
+goes `unknown` while the car is charging — the API stops reporting it until the
+charge ends.
+
 ## Requirements
 
 - A MyTOYOTA Israel account — phone number and Israeli ID.

@@ -53,6 +53,10 @@ class ToyotaSensorDescription(SensorEntityDescription):
 
     value_fn: Callable[[CarData], Any]
     exists_fn: Callable[[CarData], bool] = lambda _: True
+    # Whether the source that feeds this sensor answered at all. A source that
+    # answered without a value yields "unknown"; only a source we could not read
+    # makes the entity unavailable.
+    available_fn: Callable[[CarData], bool] = lambda _: True
 
 
 SENSORS: tuple[ToyotaSensorDescription, ...] = (
@@ -60,6 +64,7 @@ SENSORS: tuple[ToyotaSensorDescription, ...] = (
     ToyotaSensorDescription(
         key="battery",
         translation_key="battery",
+        available_fn=lambda c: c.battery is not None,
         device_class=SensorDeviceClass.BATTERY,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
@@ -69,6 +74,7 @@ SENSORS: tuple[ToyotaSensorDescription, ...] = (
     ToyotaSensorDescription(
         key="range",
         translation_key="range",
+        available_fn=lambda c: c.battery is not None,
         device_class=SensorDeviceClass.DISTANCE,
         native_unit_of_measurement=UnitOfLength.KILOMETERS,
         state_class=SensorStateClass.MEASUREMENT,
@@ -88,6 +94,7 @@ SENSORS: tuple[ToyotaSensorDescription, ...] = (
     ToyotaSensorDescription(
         key="charging_time_left",
         translation_key="charging_time_left",
+        available_fn=lambda c: c.battery is not None,
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.MINUTES,
         value_fn=lambda c: (c.battery or {}).get("chargingMinutesLeftTillFullBattery"),
@@ -96,6 +103,7 @@ SENSORS: tuple[ToyotaSensorDescription, ...] = (
     ToyotaSensorDescription(
         key="charging_power",
         translation_key="charging_power",
+        available_fn=lambda c: c.battery is not None,
         device_class=SensorDeviceClass.POWER,
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
         state_class=SensorStateClass.MEASUREMENT,
@@ -107,6 +115,7 @@ SENSORS: tuple[ToyotaSensorDescription, ...] = (
     ToyotaSensorDescription(
         key="location_address",
         translation_key="location_address",
+        available_fn=lambda c: c.location is not None,
         value_fn=lambda c: (
             ", ".join(
                 p for p in (
@@ -255,7 +264,9 @@ class ToyotaIsraelSensor(ToyotaIsraelEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        return super().available and self.native_value is not None
+        if not super().available or (car := self.car) is None:
+            return False
+        return self.entity_description.available_fn(car)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
