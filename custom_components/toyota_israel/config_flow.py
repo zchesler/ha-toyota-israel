@@ -338,8 +338,7 @@ class ToyotaIsraelOptionsFlow(OptionsFlow):
                         )
                     ),
                     vol.Required(
-                        CONF_CHARGING_EFFICIENCY,
-    CONF_CHARGING_SCAN_INTERVAL_MINUTES, default=charging
+                        CONF_CHARGING_SCAN_INTERVAL_MINUTES, default=charging
                     ): NumberSelector(
                         NumberSelectorConfig(
                             min=int(MIN_CHARGING_SCAN_INTERVAL.total_seconds() // 60),
