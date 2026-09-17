@@ -130,26 +130,6 @@ SENSORS: tuple[ToyotaSensorDescription, ...] = (
         available_fn=lambda c: c.battery is not None,
     ),
     ToyotaSensorDescription(
-        key="last_charge_energy",
-        translation_key="last_charge_energy",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        suggested_display_precision=2,
-        value_fn=lambda c: (c.charge.last_energy if c.charge else None),
-        exists_fn=lambda c: c.has_battery,
-        attrs_fn=lambda c: (
-            {
-                "battery_energy": c.charge.last_battery_energy,
-                "start_percentage": c.charge.last_start_pct,
-                "end_percentage": c.charge.last_end_pct,
-                "duration_minutes": c.charge.last_duration_min,
-                "finished": c.charge.last_finished,
-            }
-            if c.charge and c.charge.last_energy is not None
-            else None
-        ),
-    ),
-    ToyotaSensorDescription(
         key="location_address",
         translation_key="location_address",
         available_fn=lambda c: c.location is not None,
@@ -294,12 +274,48 @@ async def async_setup_entry(
         if description.exists_fn(car)
     ]
     entities += [
-        ToyotaTotalChargeEnergy(coordinator, plate, TOTAL_CHARGE_ENERGY)
+        entity
         for plate, car in coordinator.data.items()
         if car.has_battery
+        for entity in (
+            ToyotaLastChargeEnergy(coordinator, plate, LAST_CHARGE_ENERGY),
+            ToyotaTotalChargeEnergy(coordinator, plate, TOTAL_CHARGE_ENERGY),
+        )
     ]
     async_add_entities(entities)
 
+
+LAST_CHARGE_ENERGY = ToyotaSensorDescription(
+    key="last_charge_energy",
+    translation_key="last_charge_energy",
+    device_class=SensorDeviceClass.ENERGY,
+    native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+    suggested_display_precision=2,
+    value_fn=lambda c: (c.charge.last_energy if c.charge else None),
+    attrs_fn=lambda c: (
+        {
+            "battery_energy": c.charge.last_battery_energy,
+            "start_percentage": c.charge.last_start_pct,
+            "end_percentage": c.charge.last_end_pct,
+            "duration_minutes": c.charge.last_duration_min,
+            "finished": c.charge.last_finished,
+        }
+        if c.charge and c.charge.last_energy is not None
+        else None
+    ),
+)
+
+# Only these come back from the restored state; the rest of a stored state's
+# attributes are HA's own (unit, device class, friendly name).
+RESTORED_CHARGE_ATTRS = frozenset(
+    {
+        "battery_energy",
+        "start_percentage",
+        "end_percentage",
+        "duration_minutes",
+        "finished",
+    }
+)
 
 TOTAL_CHARGE_ENERGY = SensorEntityDescription(
     key="total_charge_energy",
@@ -331,6 +347,53 @@ class ToyotaIsraelSensor(ToyotaIsraelEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any] | None:
         car = self.car
         return self.entity_description.attrs_fn(car) if car else None
+
+
+class ToyotaLastChargeEnergy(ToyotaIsraelEntity, RestoreSensor):
+    """What the most recent finished charge took, kept across restarts.
+
+    The coordinator only knows about sessions it bracketed itself, so after a
+    restart it reports nothing until the next charge ends. Falling back to the
+    restored value means a restart no longer erases the last charge's figures.
+    """
+
+    entity_description: ToyotaSensorDescription
+
+    def __init__(
+        self,
+        coordinator: ToyotaIsraelCoordinator,
+        plate: str,
+        description: ToyotaSensorDescription,
+    ) -> None:
+        super().__init__(coordinator, plate, description)
+        self._restored: float | None = None
+        self._restored_attrs: dict[str, Any] | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if (last := await self.async_get_last_sensor_data()) and (
+            last.native_value is not None
+        ):
+            self._restored = float(last.native_value)
+        if (state := await self.async_get_last_state()) is not None:
+            attrs = {
+                key: _date(value) if key == "finished" else value
+                for key, value in state.attributes.items()
+                if key in RESTORED_CHARGE_ATTRS
+            }
+            self._restored_attrs = attrs or None
+
+    @property
+    def native_value(self) -> Any:
+        car = self.car
+        live = self.entity_description.value_fn(car) if car else None
+        return self._restored if live is None else live
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        car = self.car
+        live = self.entity_description.attrs_fn(car) if car else None
+        return self._restored_attrs if live is None else live
 
 
 class ToyotaTotalChargeEnergy(ToyotaIsraelEntity, RestoreSensor):
